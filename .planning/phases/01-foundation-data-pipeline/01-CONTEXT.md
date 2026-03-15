@@ -21,7 +21,7 @@ This phase delivers the core data infrastructure for the AI-Driven Healthcare An
 ### Persistence (PostgreSQL/TimescaleDB)
 - **Schema**: Separate tables for `vitals` (high frequency), `anomalies` (event-based), and `alerts` (notification history).
 - **TimescaleDB**: Use hypertables for the `vitals` table with a 1-day chunk interval for optimal performance and compression.
-- **Audit Trail**: Every record in `vitals` and `anomalies` will include a `received_at` and `processed_at` timestamp for compliance.
+- **Audit Trail**: Every record in `vitals`, `anomalies`, and `alerts` will include a `received_at` and `processed_at` timestamp for compliance.
 
 ### Claude's Discretion
 - **Kafka Client Library**: Choice of Python library (e.g., confluent-kafka vs kafka-python) is left to implementation based on performance research.

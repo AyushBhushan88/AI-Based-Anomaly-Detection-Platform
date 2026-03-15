@@ -1,0 +1,5 @@
+pytest-postgresql
+pytest-docker
+confluent-kafka
+psycopg[binary]
+python-dotenv
