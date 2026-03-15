@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from confluent_kafka import Consumer, KafkaError
 from psycopg import connect
 from dotenv import load_dotenv
+from src.intelligence.inference import InferenceEngine
 
 load_dotenv()
 
@@ -28,6 +29,8 @@ def ingest_vitals():
     consumer = Consumer(conf)
     consumer.subscribe([KAFKA_TOPIC_RAW])
     
+    inference_engine = InferenceEngine()
+    
     print(f"Ingestion worker started. Listening on {KAFKA_TOPIC_RAW}...")
 
     batch = []
@@ -45,6 +48,26 @@ def ingest_vitals():
                     else:
                         try:
                             data = json.loads(msg.value().decode("utf-8"))
+                            
+                            # Real-time Inference
+                            inference_result = inference_engine.process_sensor_data(
+                                data["patient_id"], 
+                                data["sensor_type"], 
+                                data["value"]
+                            )
+                            
+                            if inference_result:
+                                score, severity = inference_result
+                                data["anomaly_score"] = score
+                                data["severity"] = severity
+                                
+                                # Trigger Alert for HIGH severity (Placeholder for Phase 3)
+                                if severity == "HIGH":
+                                    print(f"!!! CRITICAL ANOMALY DETECTED for {data['patient_id']} !!! Score: {score:.4f}")
+                            else:
+                                data["anomaly_score"] = 0.0
+                                data["severity"] = "LOW"
+                                
                             # Add audit trail metadata
                             data["received_at"] = datetime.now(timezone.utc).isoformat()
                             batch.append(data)
@@ -64,13 +87,15 @@ def ingest_vitals():
         consumer.close()
 
 def flush_batch(conn, batch):
-    """Bulk insert vitals using the PostgreSQL COPY protocol."""
+    """Bulk insert vitals using the PostgreSQL COPY protocol and log anomalies."""
     processed_at = datetime.now(timezone.utc)
     
     # Prepare data for COPY (CSV-like format)
-    rows = []
+    vitals_rows = []
+    anomalies_rows = []
+    
     for item in batch:
-        rows.append((
+        vitals_rows.append((
             item.get("time"),
             item.get("patient_id"),
             item.get("sensor_type"),
@@ -79,11 +104,34 @@ def flush_batch(conn, batch):
             item.get("received_at"),
             processed_at
         ))
+        
+        # If an anomaly was detected (severity > LOW), log to anomalies table
+        severity = item.get("severity", "LOW")
+        if severity != "LOW":
+            anomalies_rows.append((
+                item.get("time"),
+                item.get("patient_id"),
+                item.get("sensor_type"),
+                severity,
+                item.get("anomaly_score", 0.0),
+                json.dumps({"source": "real-time-inference"}),
+                item.get("received_at"),
+                processed_at
+            ))
 
     with conn.cursor() as cur:
+        # Bulk insert vitals
         with cur.copy("COPY vitals (time, patient_id, sensor_type, value, anomaly_score, received_at, processed_at) FROM STDIN") as copy:
-            for row in rows:
+            for row in vitals_rows:
                 copy.write_row(row)
+        
+        # Bulk insert anomalies (if any)
+        if anomalies_rows:
+            with cur.copy("COPY anomalies (time, patient_id, sensor_type, severity, score, details, received_at, processed_at) FROM STDIN") as copy:
+                for row in anomalies_rows:
+                    copy.write_row(row)
+            print(f"Logged {len(anomalies_rows)} anomalies to anomalies table.")
+
         conn.commit()
     print(f"Flushed {len(batch)} records to vitals table.")
 
