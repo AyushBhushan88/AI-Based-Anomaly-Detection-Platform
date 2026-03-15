@@ -3,3 +3,7 @@ pytest-docker
 confluent-kafka
 psycopg[binary]
 python-dotenv
+torch
+scikit-learn
+pandas
+numpy
